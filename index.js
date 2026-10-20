@@ -361,6 +361,23 @@ export function apply(ctx) {
     return sessionId
   }
 
+  /* dsh-purge (and older personaSuffix templates) still reference {{cwd}}.
+     dsh 0.2.1-rc.2 no longer registers it; without this, every turn fails
+     during prompt assembly. Working-directory also publishes the path as
+     runtime context — this variable only satisfies the template. */
+  ctx.effect(() => ctx.systemPrompt.variable('cwd', (context) => {
+    const agent = context?.agent
+    const sessionId = typeof agent?.session === 'string' ? agent.session
+      : typeof agent?.id === 'string' ? agent.id
+      : undefined
+    try {
+      if (sessionId !== undefined) return String(ctx.workingDirectory.get(sessionId))
+    } catch {
+      /* projection may be unavailable for a brand-new agent */
+    }
+    return String(ctx.workingDirectory.defaultDirectory ?? '')
+  }), 'topics: cwd prompt variable')
+
   ctx.on('agent/created', async ({ agent }) => {
     await load()
     await install(agent)
