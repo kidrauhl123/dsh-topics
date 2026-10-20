@@ -100,11 +100,13 @@ export function apply(ctx) {
   let tail = Promise.resolve()
   /** sessionId → { topicId, fiber } for live bound Agents. */
   const fibers = new Map()
-  let loaded = false
+  /* One shared read: every caller waits for the same load, so nothing sees an
+     empty state while the file is still being read. */
+  let loading
 
-  const load = async () => {
-    if (loaded) return
-    loaded = true
+  const load = () => (loading ??= readState())
+
+  const readState = async () => {
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8'))
       if (Array.isArray(parsed.topics)) {
@@ -347,6 +349,7 @@ export function apply(ctx) {
   }
 
   ctx.on('agent/created', async ({ agent }) => {
+    await load()
     await install(agent)
   })
   ctx.on('agent/disposed', ({ agent }) => disposeFiber(agent.id))
@@ -551,5 +554,8 @@ export function apply(ctx) {
     },
   })
 
-  for (const agent of ctx.agents.list()) install(agent)
+  /* Agents restored before this plugin loaded its file still need their topic. */
+  load().then(() => {
+    for (const agent of ctx.agents.list()) install(agent)
+  }, (error) => ctx.logger?.warn?.(`topics: could not load: ${String(error)}`))
 }
