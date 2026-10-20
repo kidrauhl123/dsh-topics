@@ -29,7 +29,7 @@ const ROUTE_MOVE = '/api/topics.move'
 const SECTION_NAME = 'topic:instructions'
 
 export const name = 'dsh-topics'
-export const inject = ['agents', 'connection', 'sessionController', 'sessionQuery', 'systemPrompt', 'workspaceRegistry', 'workingDirectory']
+export const inject = ['agents', 'connection', 'sessionController', 'sessionQuery', 'systemPrompt', 'workspaceRegistry', 'workingDirectory', 'tools']
 
 /** Timestamp helper. */
 const now = () => new Date().toISOString()
@@ -66,8 +66,27 @@ function normalizeTopic(value, fallbackId) {
  * @param topic - the bound topic, or undefined when the Session has none.
  * @returns prompt text, empty when the topic contributes nothing.
  */
+/** Marker for the non-stored tool tip appended by renderTopic. */
+const TOOL_TIP_MARK = '【话题笔记】'
+
+/** Brief instruction appended at injection time; never persisted in topic.prompt. */
+function topicToolTip() {
+  return `${TOOL_TIP_MARK}这段文字是本话题的共享持久笔记。学到与本话题相关的稳定事实、决定、进度或偏好时，用 topic_update_prompt 整段重写更新（保留仍有用的内容）。`
+}
+
+/**
+ * Render the system-prompt text one topic contributes.
+ * Body is the stored (or default) prompt; the tool tip is appended only here.
+ * @param topic - the bound topic, or undefined when the Session has none.
+ * @returns prompt text, empty when the topic contributes nothing.
+ */
 function renderTopic(topic) {
   if (topic === undefined) return ''
+  return `${topicBody(topic)}\n\n${topicToolTip()}`
+}
+
+/** Stored or default prompt body, without the tool tip. */
+function topicBody(topic) {
   const custom = typeof topic.prompt === 'string' ? topic.prompt.trim() : ''
   return custom === '' ? defaultPrompt(topic) : custom
 }
@@ -75,6 +94,13 @@ function renderTopic(topic) {
 /** The computed text a topic without its own prompt injects; follows renames. */
 function defaultPrompt(topic) {
   return `# Topic: ${topic.title}\n\nThis Session belongs to the "${topic.title}" topic.`
+}
+
+/** Drop a trailing tool tip the model may have copied into a rewrite. */
+function stripToolTip(text) {
+  const mark = text.lastIndexOf(TOOL_TIP_MARK)
+  if (mark === -1) return text
+  return text.slice(0, mark).trimEnd()
 }
 
 /**
@@ -446,6 +472,23 @@ export function apply(ctx) {
     },
   })
 
+  /**
+   * Persist one topic's prompt (UI and model tool share this path).
+   * Empty / default-equivalent clears storage so the default keeps following renames.
+   * @returns {{ ok: true, topic } | { ok: false, error: string }}
+   */
+  const setTopicPrompt = async (id, promptValue) => {
+    await load()
+    if (typeof promptValue !== 'string') return { ok: false, error: 'prompt must be a string' }
+    const index = state.topics.findIndex((topic) => topic.id === id)
+    if (index === -1) return { ok: false, error: `unknown topic "${id}"` }
+    const text = stripToolTip(promptValue.trim())
+    const prompt = text === '' || text === defaultPrompt(state.topics[index]) ? '' : text
+    state.topics[index] = { ...state.topics[index], prompt, updatedAt: now() }
+    await persist()
+    return { ok: true, topic: state.topics[index] }
+  }
+
   /* Edit the topic's own prompt text; bound Sessions read it at assembly time. */
   ctx.connection.fetch.register({
     path: ROUTE_UPDATE,
@@ -454,20 +497,70 @@ export function apply(ctx) {
     fetch: async (request) => {
       const body = await readJson(request)
       return serialize(async () => {
-        await load()
         const id = typeof body.id === 'string' ? body.id : ''
-        if (typeof body.prompt !== 'string') return await respond({ error: 'prompt must be a string' })
-        const index = state.topics.findIndex((topic) => topic.id === id)
-        if (index === -1) return await respond({ error: `unknown topic "${id}"` })
-        /* Empty, or exactly the default, stores nothing so the default keeps following renames. */
-        const text = body.prompt.trim()
-        const prompt = text === '' || text === defaultPrompt(state.topics[index]) ? '' : text
-        state.topics[index] = { ...state.topics[index], prompt, updatedAt: now() }
-        await persist()
+        const result = await setTopicPrompt(id, body.prompt)
+        if (!result.ok) return await respond({ error: result.error })
         return json(await view())
       })
     },
   })
+
+  /* Model-callable: rewrite the prompt of the topic bound to this Session. */
+  if (ctx.tools) {
+    ctx.tools.register({
+      name: 'topic_update_prompt',
+      description: 'Rewrite the persistent prompt/notes for the topic bound to this Session. Pass the full new text (not a patch). Pass an empty string to reset to the default topic header. The tip about topic_update_prompt is injected automatically — do not include it in the saved text.',
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['prompt'],
+        properties: {
+          prompt: {
+            type: 'string',
+            description: 'Full replacement text for the topic prompt. Empty string resets to the default.',
+          },
+        },
+      },
+      output: {
+        schema: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            ok: { type: 'boolean' },
+            topicId: { type: 'string' },
+            title: { type: 'string' },
+            prompt: { type: 'string' },
+            error: { type: 'string' },
+          },
+        },
+        render: (_args, value) => [{
+          type: 'text',
+          text: value?.ok
+            ? `Updated topic "${value.title}" prompt (${String(value.prompt ?? '').length} chars).`
+            : `topic_update_prompt failed: ${value?.error ?? 'unknown error'}`,
+        }],
+      },
+      async execute(args, exec) {
+        const sessionId = exec?.agent?.session?.id ?? exec?.agent?.id
+        if (typeof sessionId !== 'string' || sessionId === '') {
+          return { ok: false, error: 'no Session on this tool call' }
+        }
+        await load()
+        const topic = topicOf(sessionId)
+        if (topic === undefined) {
+          return { ok: false, error: 'this Session is not bound to any topic' }
+        }
+        const result = await serialize(() => setTopicPrompt(topic.id, args.prompt))
+        if (!result.ok) return { ok: false, error: result.error }
+        return {
+          ok: true,
+          topicId: result.topic.id,
+          title: result.topic.title,
+          prompt: result.topic.prompt,
+        }
+      },
+    })
+  }
 
   ctx.connection.fetch.register({
     path: ROUTE_DELETE,
