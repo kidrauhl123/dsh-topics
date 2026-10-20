@@ -24,7 +24,6 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const NS = 'topics'
-    const PANEL_ID = 'topics'
     const CSS_MARK = 'data-dsh-topics-css'
 
     const zh = {
@@ -1653,98 +1652,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** One topic row on the panel page. */
-    function TopicRow({ t, topic, busy, onOpen, onRename, onDelete }) {
-      return h('li', { className: 'dsh-topics-row' },
-        h('span', { className: 'dsh-topics-row-hash' }, h(HashIcon, { size: 15 })),
-        h('div', { className: 'dsh-topics-row-main' },
-          h('div', { className: 'dsh-topics-row-title' }, topic.title),
-          h('div', { className: 'dsh-topics-row-meta' }, t('sessionsCount', { n: topic.sessionIds.length }))),
-        h('div', { className: 'dsh-topics-row-actions' },
-          h('button', {
-            type: 'button', className: 'dsh-topics-btn dsh-topics-btn--plain dsh-topics-btn--sm', disabled: busy,
-            onClick: () => onOpen(topic),
-          }, t('open')),
-          h('button', {
-            type: 'button', className: 'dsh-topics-btn dsh-topics-btn--plain dsh-topics-btn--sm', disabled: busy,
-            onClick: () => onRename(topic),
-          }, t('rename')),
-          h('button', {
-            type: 'button', className: 'dsh-topics-btn dsh-topics-btn--plain dsh-topics-btn--sm', disabled: busy,
-            onClick: () => onDelete(topic),
-          }, t('delete'))))
-    }
-
-    /**
-     * The panel page: the topic list, each row opening a Session under it.
-     * @param props - translator, store, Session opener, and the name dialog.
-     */
-    function TopicsPage({ t, store, openSession, dialog }) {
-      const snapshot = useSnapshot(store)
-      const [busy, setBusy] = React.useState(false)
-      const [failure, setFailure] = React.useState(null)
-
-      React.useEffect(() => { void store.refresh() }, [store])
-
-      const guard = async (task) => {
-        setBusy(true)
-        setFailure(null)
-        try {
-          await task()
-        } catch (error) {
-          setFailure(String(error?.message ?? error))
-        } finally {
-          setBusy(false)
-        }
-      }
-
-      const openTopic = (topic) => guard(async () => {
-        const value = await store.createSession(topic.id)
-        if (typeof value.sessionId === 'string') openSession(value.sessionId)
-      })
-
-      const create = () => dialog.open({
-        title: t('createTitle'),
-        value: '',
-        confirmLabel: t('createConfirm'),
-        onSubmit: (name) => store.create(name),
-      })
-
-      const rename = (topic) => dialog.open({
-        title: t('renameTitle'),
-        value: topic.title,
-        confirmLabel: t('renameConfirm'),
-        onSubmit: (name) => store.rename(topic.id, name),
-      })
-
-      return h('section', { className: 'dsh-topics-page', 'aria-label': t('title') },
-        h('div', { className: 'dsh-topics-page-inner' },
-          h('div', { className: 'dsh-topics-head' },
-            h('h1', { className: 'dsh-topics-h1' }, t('title')),
-            h('button', {
-              type: 'button', className: 'dsh-topics-btn dsh-topics-btn--primary dsh-topics-btn--new', disabled: busy,
-              onClick: create,
-            }, t('create'))),
-          h('p', { className: 'dsh-topics-sub' }, t('subtitle')),
-          failure !== null && h('p', { className: 'dsh-topics-failure', role: 'alert' }, failure),
-          snapshot.status === 'error' && h('p', { className: 'dsh-topics-failure', role: 'alert' },
-            `${t('error')}${snapshot.error === null ? '' : `：${snapshot.error}`}`),
-          snapshot.status === 'loading'
-            ? h('p', { className: 'dsh-topics-empty' }, t('loading'))
-            : snapshot.topics.length === 0
-              ? h('p', { className: 'dsh-topics-empty' }, t('empty'))
-              : h('ul', { className: 'dsh-topics-list' },
-                snapshot.topics.map((topic) => h(TopicRow, {
-                  key: topic.id,
-                  t,
-                  topic,
-                  busy,
-                  onOpen: openTopic,
-                  onRename: rename,
-                  onDelete: (target) => guard(() => store.remove(target.id)),
-                })))))
-    }
-
     /** The leading "#" mark on a Session row bound to a topic. */
     function SessionTopicMark({ sessionId, store, t }) {
       const snapshot = useSnapshot(store)
@@ -1924,25 +1831,6 @@ window.__ModuleLoader__.load({
             }
           },
         }), 'topics: sidebar groups')
-
-        ctx.slots.inject('main', () => ctx.slots.register({
-          name: 'main',
-          key: PANEL_ID,
-          locale: NS,
-          inject: () => ({
-            store,
-            dialog,
-            openSession: (sessionId) => ctx.uiWorkspace.openSession(sessionId),
-          }),
-        }, TopicsPage))
-
-        ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
-          name: 'sidebar.panellist',
-          id: PANEL_ID,
-          order: 20,
-          locale: NS,
-          label: () => t('panel'),
-        }, ({ size }) => h(HashIcon, { size })))
 
         ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register({
           name: 'sidebar.session.row.leading',
