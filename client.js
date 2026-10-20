@@ -22,6 +22,23 @@ window.__ModuleLoader__.load({
   factory(require) {
     const React = require('react')
     const h = React.createElement
+    const { createRoot } = require('react-dom/client')
+    const ui = require('@deepseek-ai/dsh-client-ui-primitives')
+    const {
+      Menu,
+      MenuGroup,
+      MenuItemButton,
+      Tooltip,
+      IconEllipsisOutlineRegular,
+      IconPinOutlineRegular,
+      IconPinFillRegular,
+      IconArchiveOutlineRegular,
+      IconUnarchiveOutlineRegular,
+      IconEditOutlineRegular,
+      IconBranchOutlineRegular,
+      IconCopyOutlineRegular,
+      IconCheckOutlineRegular,
+    } = ui
 
     const NS = 'topics'
     const CSS_MARK = 'data-dsh-topics-css'
@@ -71,10 +88,13 @@ window.__ModuleLoader__.load({
       'menu.pinSession': '置顶会话',
       'menu.unpinSession': '取消置顶',
       'menu.renameSession': '重命名',
+      'menu.fork': '分叉会话',
       'menu.archiveSession': '归档会话',
+      'menu.unarchiveSession': '取消归档',
       'menu.sessionId': '复制 Session ID',
       'actions.session.aria': '会话“{name}”的操作',
       'actions.archive': '归档会话',
+      'actions.unarchive': '取消归档',
       'actions.pin': '置顶会话',
       'actions.unpin': '取消置顶',
     }
@@ -124,10 +144,13 @@ window.__ModuleLoader__.load({
       'menu.pinSession': 'Pin session',
       'menu.unpinSession': 'Unpin session',
       'menu.renameSession': 'Rename',
+      'menu.fork': 'Fork session',
       'menu.archiveSession': 'Archive session',
+      'menu.unarchiveSession': 'Unarchive session',
       'menu.sessionId': 'Copy Session ID',
       'actions.session.aria': 'Actions for session "{name}"',
       'actions.archive': 'Archive session',
+      'actions.unarchive': 'Unarchive session',
       'actions.pin': 'Pin session',
       'actions.unpin': 'Unpin session',
     }
@@ -210,19 +233,20 @@ window.__ModuleLoader__.load({
 .dsh-topics-projectText{display:flex;flex-direction:column;flex:1;gap:2px;min-width:0}
 .dsh-topics-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;line-height:20px}
 
-.dsh-topics-rowActions{flex:none;display:none;align-items:center;gap:4px}
-.dsh-topics-projectRow .dsh-topics-rowActions{gap:15px}
+.dsh-topics-rowActions{flex:none;display:none;align-items:center;gap:15px}
 .dsh-topics-projectRow:hover .dsh-topics-rowActions,.dsh-topics-projectRow[data-menu="1"] .dsh-topics-rowActions,.dsh-topics-sessionRow:hover .dsh-topics-rowActions,.dsh-topics-sessionRow[data-menu="1"] .dsh-topics-rowActions{display:inline-flex}
-.dsh-topics-sessionRow:hover [class*="_time"],.dsh-topics-sessionRow[data-menu="1"] [class*="_time"]{display:none}
+.dsh-topics-sessionRow:hover [class*="_time"],.dsh-topics-sessionRow[data-menu="1"] [class*="_time"],.dsh-topics-sessionRow:hover .dsh-topics-pinIndicator,.dsh-topics-sessionRow[data-menu="1"] .dsh-topics-pinIndicator{display:none}
 .dsh-topics-iconButton{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:0;border-radius:var(--dsw-radius-xs);background:0 0;color:var(--dsw-alias-label-tertiary);cursor:pointer;flex:none}
 .dsh-topics-iconButton:hover{color:var(--dsw-alias-label-primary)}
 .dsh-topics-iconButton:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:0}
+.dsh-topics-pinIndicator{width:16px;height:20px;margin-left:6px;color:var(--dsw-alias-label-caption);flex:none;display:inline-flex;align-items:center;justify-content:center}
 
 .dsh-topics-sessionRow{box-sizing:border-box;display:flex;align-items:center;gap:0;height:32px;padding:0 8px;padding-inline-start:calc(8px + var(--dsh-workspace-indent,0px));border-radius:var(--dsw-radius-md);color:var(--dsw-alias-label-primary);cursor:pointer;user-select:none}
-.dsh-topics-sessionRow:hover,.dsh-topics-sessionRow[data-selected="1"]{background:var(--dsw-alias-interactive-bg-hover)}
+.dsh-topics-sessionRow:hover,.dsh-topics-sessionRow[data-selected="1"],.dsh-topics-sessionRow[data-menu="1"]{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-topics-sessionRow:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:-2px}
 .dsh-topics-sessionSlot{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:20px}
 .dsh-topics-sessionTitle{flex:1;min-width:0;margin:0 6px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:20px}
+@media (hover:hover){.dsh-topics-sessionRow:hover .dsh-topics-sessionTitle,.dsh-topics-sessionRow[data-menu="1"] .dsh-topics-sessionTitle{text-overflow:clip}}
 
 /* The read-only details sheet reuses the dialog surface; only the prompt block
    and the key/value rows are its own. */
@@ -1049,62 +1073,6 @@ window.__ModuleLoader__.load({
         document.addEventListener('keydown', onPopoverKey, true)
       }
 
-      const openSessionPopover = (anchor, session, topic) => {
-        closePopover()
-        const surface = document.createElement('div')
-        surface.className = 'dsh-topics-popover'
-        surface.setAttribute('role', 'menu')
-        surface.setAttribute('aria-label', session.title || t('group.untitled'))
-        const addRow = (label, danger, run) => {
-          const row = document.createElement('button')
-          row.type = 'button'
-          row.className = 'dsh-topics-popover-row'
-          row.setAttribute('role', 'menuitem')
-          if (danger) row.setAttribute('data-danger', '1')
-          row.textContent = label
-          row.addEventListener('click', () => {
-            closePopover()
-            run()
-          })
-          surface.append(row)
-        }
-        const addSeparator = () => {
-          const sep = document.createElement('div')
-          sep.className = 'dsh-topics-popover-sep'
-          surface.append(sep)
-        }
-
-        const isPinned = options.isPinned(session.sessionId)
-        const isArchived = options.isArchived(session.sessionId)
-
-        if (!isArchived) {
-          addRow(t(isPinned ? 'menu.unpinSession' : 'menu.pinSession'), false, () => {
-            if (isPinned) options.unpinSession(session.sessionId)
-            else options.pinSession(session.sessionId)
-          })
-        }
-        addRow(t('menu.renameSession'), false, () => options.renameSession(session))
-        addRow(t('menu.fork'), false, () => options.forkSession(session.sessionId, topic.id))
-        addRow(t(isArchived ? 'menu.unarchiveSession' : 'menu.archiveSession'), false, () => {
-          if (isArchived) options.unarchiveSession(session.sessionId)
-          else options.archiveSession(session.sessionId)
-        })
-        addRow(t('menu.sessionId'), false, () => options.copySessionId(session.sessionId))
-        addSeparator()
-        addRow(t('menu.unbind'), true, () => options.unbindSession(session.sessionId))
-
-        menuRow = anchor.closest('.dsh-topics-sessionRow')
-        if (menuRow !== null) menuRow.setAttribute('data-menu', '1')
-        document.body.append(surface)
-        const rect = anchor.getBoundingClientRect()
-        const width = surface.offsetWidth
-        surface.style.top = `${Math.round(rect.bottom + 4)}px`
-        surface.style.left = `${Math.round(Math.max(8, Math.min(rect.left, window.innerWidth - width - 8)))}px`
-        popover = surface
-        document.addEventListener('pointerdown', onPopoverPointer, true)
-        document.addEventListener('keydown', onPopoverKey, true)
-      }
-
       /* Drag state for reordering. Topics and Sessions share one record; a drop
          asks the Host to write the new order, and the rebuild that follows the
          response is what makes the order durable on screen. */
@@ -1178,6 +1146,9 @@ window.__ModuleLoader__.load({
 
       const build = () => {
         const snapshot = store.get()
+        for (const root of reactRoots.splice(0)) {
+          try { root.unmount() } catch { /* already gone */ }
+        }
         const wrap = document.createElement('div')
         wrap.className = 'dsh-topics-groups'
         for (const topic of snapshot.topics) {
@@ -1367,132 +1338,58 @@ window.__ModuleLoader__.load({
                 if (session.sessionId === currentSessionId()) sessionRow.setAttribute('data-selected', '1')
                 sessionRow.append(slot, sessionTitle)
                 const isPinned = options.isPinned(session.sessionId)
+                const isArchived = options.isArchived(session.sessionId)
                 const isBlank = summary?.blank === true
 
-                if (isPinned) {
-                  const pinBadge = document.createElement('span')
-                  pinBadge.className = 'dsh-topics-pinIndicator'
-                  pinBadge.style.marginRight = '6px'
-                  pinBadge.style.display = 'inline-flex'
-                  pinBadge.style.alignItems = 'center'
-                  pinBadge.style.color = 'var(--dsw-alias-label-tertiary)'
-                  pinBadge.append(pinFillElement(14))
-                  sessionRow.append(pinBadge)
-                }
-
-                /* And the trailing time, when the shipped row shows one. */
+                /* Same trailing order as the shipped row: relative time, then the
+                   rest-state pin marker, then hover actions (… / archive / pin). */
                 const shipped = nativeRows.get(session.sessionId)
                 const timeEl = shipped === undefined
                   ? undefined
                   : [...shipped.children].find((node) => hasClassNamed(node, 'time'))
                 if (timeEl !== undefined) sessionRow.append(timeEl.cloneNode(true))
 
-                if (!isBlank) {
-                  const sessionActions = document.createElement('span')
-                  sessionActions.className = 'dsh-topics-rowActions'
-
-                  const pinBtn = document.createElement('button')
-                  pinBtn.type = 'button'
-                  pinBtn.className = 'dsh-topics-iconButton'
-                  pinBtn.title = t(isPinned ? 'actions.unpin' : 'actions.pin')
-                  pinBtn.setAttribute('aria-label', t(isPinned ? 'actions.unpin' : 'actions.pin'))
-                  pinBtn.append(isPinned ? pinFillElement(14) : pinOutlineElement(14))
-                  pinBtn.addEventListener('click', (event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    /* Forward to native row button if available */
-                    const nativeRow = nativeRows.get(session.sessionId)
-                    const nativePinBtn = nativeRow?.querySelector?.('[aria-label*="置顶"], [aria-label*="Pin"], [aria-label*="pin"]')
-                    if (nativePinBtn) nativePinBtn.click()
-                    else if (isPinned) options.unpinSession(session.sessionId)
-                    else options.pinSession(session.sessionId)
-                  })
-
-                  const archiveBtn = document.createElement('button')
-                  archiveBtn.type = 'button'
-                  archiveBtn.className = 'dsh-topics-iconButton'
-                  archiveBtn.title = t('actions.archive')
-                  archiveBtn.setAttribute('aria-label', t('actions.archive'))
-                  archiveBtn.append(archiveElement(14))
-                  archiveBtn.addEventListener('click', (event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    /* Forward to native row button if available */
-                    const nativeRow = nativeRows.get(session.sessionId)
-                    const nativeArchiveBtn = nativeRow?.querySelector?.('[aria-label*="归档"], [aria-label*="Archive"], [aria-label*="archive"]')
-                    if (nativeArchiveBtn) nativeArchiveBtn.click()
-                    else options.archiveSession(session.sessionId)
-                  })
-
-                  const sessionMenuBtn = document.createElement('button')
-                  sessionMenuBtn.type = 'button'
-                  sessionMenuBtn.className = 'dsh-topics-iconButton'
-                  const sessionAria = t('actions.session.aria', { name: sessionTitle.textContent })
-                  sessionMenuBtn.title = sessionAria
-                  sessionMenuBtn.setAttribute('aria-label', sessionAria)
-                  sessionMenuBtn.setAttribute('aria-haspopup', 'menu')
-                  sessionMenuBtn.append(ellipsisElement(16))
-                  sessionMenuBtn.addEventListener('click', (event) => {
-                    event.preventDefault()
-                    event.stopPropagation()
-                    /* Forward directly to native ellipsis button to trigger native React Menu */
-                    const nativeRow = nativeRows.get(session.sessionId)
-                    const nativeMenuBtn = nativeRow?.querySelector?.('button[aria-haspopup="menu"], button[class*="iconButton"]')
-                    if (nativeMenuBtn) {
-                      nativeMenuBtn.click()
-                    } else {
-                      openSessionPopover(sessionMenuBtn, session, topic)
-                    }
-                  })
-
-                  sessionActions.append(pinBtn, archiveBtn, sessionMenuBtn)
-                  sessionRow.append(sessionActions)
+                if (isPinned && !isArchived) {
+                  const pinBadge = document.createElement('span')
+                  pinBadge.className = 'dsh-topics-pinIndicator'
+                  pinBadge.setAttribute('role', 'img')
+                  pinBadge.title = t('actions.pin')
+                  pinBadge.setAttribute('aria-label', t('actions.pin'))
+                  pinBadge.append(pinFillElement(14))
+                  sessionRow.append(pinBadge)
                 }
 
-                const openSession = () => options.openSession(session.sessionId)
-                sessionRow.addEventListener('click', openSession)
-                sessionRow.addEventListener('keydown', (event) => {
-                  if (event.key !== 'Enter' && event.key !== ' ') return
-                  event.preventDefault()
-                  openSession()
-                })
-                sessionRow.addEventListener('dragstart', (event) => {
-                  drag = { kind: 'session', id: session.sessionId, topicId: topic.id }
-                  event.dataTransfer?.setData('text/plain', session.sessionId)
-                  if (event.dataTransfer !== undefined && event.dataTransfer !== null) event.dataTransfer.effectAllowed = 'move'
-                })
-                sessionRow.addEventListener('dragend', () => {
-                  drag = null
-                  clearDropMarks()
-                })
-                sessionRow.addEventListener('dragover', (event) => {
-                  if (drag === null) return
-                  event.preventDefault()
-                  event.stopPropagation()
-                  clearDropMarks()
-                  if (drag.kind === 'session') sessionRow.setAttribute('data-drop', halfOf(event, sessionRow))
-                  else section.setAttribute('data-drop', halfOf(event, sessionRow))
-                })
-                sessionRow.addEventListener('drop', (event) => {
-                  if (drag === null) return
-                  event.preventDefault()
-                  event.stopPropagation()
-                  clearDropMarks()
-                  if (drag.kind === 'session') commitSessionDrop(topic.id, sessionRow, halfOf(event, sessionRow))
-                  else commitTopicDrop(section, halfOf(event, sessionRow))
-                })
-                sessionRow.addEventListener('contextmenu', (event) => {
-                  if (isBlank) return
-                  event.preventDefault()
-                  event.stopPropagation()
-                  const nativeRow = nativeRows.get(session.sessionId)
-                  const nativeMenuBtn = nativeRow?.querySelector?.('button[aria-haspopup="menu"], button[class*="iconButton"]')
-                  if (nativeMenuBtn) {
-                    nativeMenuBtn.click()
-                  } else {
-                    openSessionPopover(sessionRow, session, topic)
-                  }
-                })
+                if (!isBlank) {
+                  /* Keep dsh-topics-* action classes: the shipped rowActions
+                     hover rules key off the workspace sessionRow hash, which
+                     this peer row does not carry. Visual tokens already match. */
+                  const host = document.createElement('span')
+                  host.style.display = 'contents'
+                  sessionRow.append(host)
+                  const menuApi = {}
+                  const root = createRoot(host)
+                  reactRoots.push(root)
+                  root.render(h(TopicSessionActions, {
+                    session,
+                    topic,
+                    title: sessionTitle.textContent,
+                    isPinned,
+                    isArchived,
+                    iconButtonClass: 'dsh-topics-iconButton',
+                    rowActionsClass: 'dsh-topics-rowActions',
+                    options,
+                    t,
+                    store: options.store,
+                    rowEl: sessionRow,
+                    menuApi,
+                  }))
+                  sessionRow.addEventListener('contextmenu', (event) => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    menuApi.open?.()
+                  })
+                }
+
                 section.append(sessionRow)
               }
             }
@@ -1518,6 +1415,7 @@ window.__ModuleLoader__.load({
          leading state cell and trailing time: a running Session must spin here
          exactly as it does under its workspace. */
       const nativeRows = new Map()
+      const reactRoots = []
       let fallbackStatus = null
       const hideBound = (snapshot) => {
         const bound = new Set()
@@ -1639,6 +1537,9 @@ window.__ModuleLoader__.load({
         clearInterval(ticker)
         observer.disconnect()
         if (frame !== 0) cancelAnimationFrame(frame)
+        for (const root of reactRoots.splice(0)) {
+          try { root.unmount() } catch { /* already gone */ }
+        }
         wrapper?.remove()
         wrapper = null
         list = null
@@ -1666,6 +1567,8 @@ window.__ModuleLoader__.load({
 
     /**
      * One Session-row menu entry set: pick a topic to bind, or drop the binding.
+     * Uses the shipped MenuGroup / MenuItemButton so the section heading and
+     * check mark line up with every other sidebar session menu.
      * @param props - row identity, menu dismissal hook, store, and translator.
      */
     function SessionTopicMenuItem({ sessionId, useMenuOpenState, store, t }) {
@@ -1677,22 +1580,176 @@ window.__ModuleLoader__.load({
         setMenuOpen(false)
         void store.bind(sessionId, topicId)
       }
-      return h('div', { role: 'none' },
-        h('div', { className: 'dsh-topics-menu-label' }, t('menu.bind')),
-        snapshot.topics.map((topic) => h('button', {
+      return h(MenuGroup, { label: t('menu.bind') },
+        snapshot.topics.map((topic) => h(MenuItemButton, {
           key: topic.id,
+          icon: topic.id === bound?.id
+            ? h(IconCheckOutlineRegular, { size: 14 })
+            : h('span', {
+              'aria-hidden': true,
+              style: { display: 'inline-block', width: 14, height: 14 },
+            }),
+          onSelect: () => choose(topic.id),
+        }, topic.title)),
+        bound !== undefined && h(MenuItemButton, {
+          danger: true,
+          separatorBefore: true,
+          onSelect: () => choose(undefined),
+        }, t('menu.unbind')),
+      )
+    }
+
+    /**
+     * Hover actions + … menu for a topic-group session row. Reuses the shipped
+     * Menu / Tooltip / icons so anchoring, order, and chrome match workspace rows
+     * (… then archive then pin; portal Menu aligned to the ellipsis button).
+     */
+    function TopicSessionActions({
+      session,
+      topic,
+      title,
+      isPinned,
+      isArchived,
+      iconButtonClass,
+      rowActionsClass,
+      options,
+      t,
+      store,
+      rowEl,
+      menuApi,
+    }) {
+      const [menuOpen, setMenuOpen] = React.useState(false)
+      React.useEffect(() => {
+        if (menuApi !== undefined && menuApi !== null) {
+          menuApi.open = () => setMenuOpen(true)
+          menuApi.close = () => setMenuOpen(false)
+        }
+        return () => {
+          if (menuApi !== undefined && menuApi !== null) {
+            if (menuApi.open !== undefined) menuApi.open = undefined
+            if (menuApi.close !== undefined) menuApi.close = undefined
+          }
+        }
+      }, [menuApi])
+      React.useEffect(() => {
+        if (rowEl === undefined || rowEl === null) return
+        if (menuOpen) rowEl.setAttribute('data-menu', '1')
+        else rowEl.removeAttribute('data-menu')
+        return () => rowEl.removeAttribute('data-menu')
+      }, [menuOpen, rowEl])
+
+      const useMenuOpenState = React.useCallback(() => [menuOpen, setMenuOpen], [menuOpen])
+      const btnClass = iconButtonClass || 'dsh-topics-iconButton'
+      const actionsClass = rowActionsClass || 'dsh-topics-rowActions'
+
+      return h('span', {
+        className: actionsClass,
+        onClick: (event) => event.stopPropagation(),
+      },
+        h(Menu, {
+          open: menuOpen,
+          onClose: () => setMenuOpen(false),
+          portal: true,
+          closeOnPointerLeave: true,
+          align: 'start',
+          side: 'bottom',
+          anchor: h('button', {
+            type: 'button',
+            className: btnClass,
+            'aria-label': t('actions.session.aria', { name: title }),
+            'aria-haspopup': 'menu',
+            onClick: (event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              setMenuOpen((v) => !v)
+            },
+          }, h(IconEllipsisOutlineRegular, {})),
+        },
+          !isArchived && h(MenuItemButton, {
+            icon: isPinned ? h(IconPinFillRegular, {}) : h(IconPinOutlineRegular, {}),
+            onSelect: () => {
+              setMenuOpen(false)
+              if (isPinned) options.unpinSession(session.sessionId)
+              else options.pinSession(session.sessionId)
+            },
+          }, t(isPinned ? 'menu.unpinSession' : 'menu.pinSession')),
+          h(MenuItemButton, {
+            icon: h(IconEditOutlineRegular, {}),
+            onSelect: () => {
+              setMenuOpen(false)
+              options.renameSession(session)
+            },
+          }, t('menu.renameSession')),
+          h(MenuItemButton, {
+            icon: h(IconBranchOutlineRegular, {}),
+            onSelect: () => {
+              setMenuOpen(false)
+              options.forkSession(session.sessionId, topic.id)
+            },
+          }, t('menu.fork')),
+          h(MenuItemButton, {
+            icon: isArchived
+              ? h(IconUnarchiveOutlineRegular, { size: 14 })
+              : h(IconArchiveOutlineRegular, { size: 14 }),
+            onSelect: () => {
+              setMenuOpen(false)
+              if (isArchived) options.unarchiveSession(session.sessionId)
+              else options.archiveSession(session.sessionId)
+            },
+          }, t(isArchived ? 'menu.unarchiveSession' : 'menu.archiveSession')),
+          h(MenuItemButton, {
+            icon: h(IconCopyOutlineRegular, {}),
+            onSelect: () => {
+              setMenuOpen(false)
+              options.copySessionId(session.sessionId)
+            },
+          }, t('menu.sessionId')),
+          h(SessionTopicMenuItem, {
+            sessionId: session.sessionId,
+            useMenuOpenState,
+            store,
+            t,
+          }),
+        ),
+        h(Tooltip, {
+          label: t(isArchived ? 'actions.unarchive' : 'actions.archive'),
+          side: 'bottom',
+          align: 'end',
+          delayMs: 500,
+          portal: true,
+        }, h('button', {
           type: 'button',
-          role: 'menuitem',
-          className: 'dsh-topics-menu-row',
-          'data-current': topic.id === bound?.id ? '1' : '0',
-          onClick: () => choose(topic.id),
-        }, topic.id === bound?.id ? `✓ ${topic.title}` : topic.title)),
-        bound !== undefined && h('button', {
+          className: btnClass,
+          'aria-label': t(isArchived ? 'menu.unarchiveSession' : 'menu.archiveSession'),
+          onClick: (event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (isArchived) options.unarchiveSession(session.sessionId)
+            else options.archiveSession(session.sessionId)
+          },
+        }, isArchived
+          ? h(IconUnarchiveOutlineRegular, { size: 14 })
+          : h(IconArchiveOutlineRegular, { size: 14 }))),
+        !isArchived && h(Tooltip, {
+          label: t(isPinned ? 'actions.unpin' : 'actions.pin'),
+          side: 'bottom',
+          align: 'end',
+          delayMs: 500,
+          portal: true,
+        }, h('button', {
           type: 'button',
-          role: 'menuitem',
-          className: 'dsh-topics-menu-row',
-          onClick: () => choose(undefined),
-        }, t('menu.unbind')))
+          className: btnClass,
+          'aria-label': t(isPinned ? 'menu.unpinSession' : 'menu.pinSession'),
+          onClick: (event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            if (isPinned) options.unpinSession(session.sessionId)
+            else options.pinSession(session.sessionId)
+          },
+        }, isPinned
+          ? h(IconPinFillRegular, { size: 14 })
+          : h(IconPinOutlineRegular, { size: 14 }))),
+      )
     }
 
     return {
