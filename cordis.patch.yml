@@ -1,0 +1,3 @@
+- insert:
+    - id: topics
+      name: '@local/dsh-topics'

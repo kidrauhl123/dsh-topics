@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "title": "话题",
+    "description": "在工作区标题栏右侧加一个 # 按钮，点一下起一个话题；从话题里开出的会话都归在它下面。"
+  },
+  "panel": "话题",
+  "title": "话题",
+  "subtitle": "点右上角的 # 起一个话题；从话题里开出的会话都归在它下面。",
+  "create": "新建话题",
+  "createTitle": "新建话题",
+  "renameTitle": "重命名话题",
+  "nameLabel": "给这个话题起个名字",
+  "namePlaceholder": "例如：论文、重构、客服问答",
+  "createConfirm": "创建",
+  "renameConfirm": "保存",
+  "cancel": "取消",
+  "empty": "还没有话题。点右上角的 # 起一个。",
+  "loading": "正在读取话题…",
+  "error": "读取话题失败",
+  "retry": "重试",
+  "delete": "删除",
+  "rename": "重命名",
+  "open": "打开会话",
+  "sessionsCount": "{n} 个会话",
+  "nameRequired": "请先填一个名字",
+  "saving": "正在创建…",
+  "addAria": "新建话题",
+  "menu.bind": "归到话题",
+  "menu.unbind": "不归任何话题",
+  "mark.aria": "属于话题"
+}

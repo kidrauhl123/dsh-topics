@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "title": "Topics",
+    "description": "Adds a # button to the workspace header: click it, name a topic, and Sessions you open from it belong to that topic."
+  },
+  "panel": "Topics",
+  "title": "Topics",
+  "subtitle": "Click # at the top right to name a topic; Sessions opened from it belong to it.",
+  "create": "New topic",
+  "createTitle": "New topic",
+  "renameTitle": "Rename topic",
+  "nameLabel": "Name this topic",
+  "namePlaceholder": "e.g. Thesis, Refactor, Support answers",
+  "createConfirm": "Create",
+  "renameConfirm": "Save",
+  "cancel": "Cancel",
+  "empty": "No topics yet. Click # at the top right to name one.",
+  "loading": "Loading topics…",
+  "error": "Could not load topics",
+  "retry": "Retry",
+  "delete": "Delete",
+  "rename": "Rename",
+  "open": "Open Session",
+  "sessionsCount": "{n} Sessions",
+  "nameRequired": "A name is required",
+  "saving": "Creating…",
+  "addAria": "New topic",
+  "menu.bind": "Assign to topic",
+  "menu.unbind": "No topic",
+  "mark.aria": "Belongs to a topic"
+}
