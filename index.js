@@ -14,7 +14,8 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 /** Stored document format version. */
-const STATE_VERSION = 2
+/** v3: `prompt` is the full injected text (v2 appended it after the default). */
+const STATE_VERSION = 3
 /** Exact Fetch routes below `/api`, inside Connection's authentication fence. */
 const ROUTE_STATE = '/api/topics.state'
 const ROUTE_CREATE = '/api/topics.create'
@@ -67,9 +68,13 @@ function normalizeTopic(value, fallbackId) {
  */
 function renderTopic(topic) {
   if (topic === undefined) return ''
-  const head = `# Topic: ${topic.title}\n\nThis Session belongs to the "${topic.title}" topic.`
-  const extra = typeof topic.prompt === 'string' ? topic.prompt.trim() : ''
-  return extra === '' ? head : `${head}\n\n${extra}`
+  const custom = typeof topic.prompt === 'string' ? topic.prompt.trim() : ''
+  return custom === '' ? defaultPrompt(topic) : custom
+}
+
+/** The computed text a topic without its own prompt injects; follows renames. */
+function defaultPrompt(topic) {
+  return `# Topic: ${topic.title}\n\nThis Session belongs to the "${topic.title}" topic.`
 }
 
 /**
@@ -107,12 +112,19 @@ export function apply(ctx) {
   const load = () => (loading ??= readState())
 
   const readState = async () => {
+    let migrated = false
     try {
       const parsed = JSON.parse(await readFile(file, 'utf8'))
       if (Array.isArray(parsed.topics)) {
         for (const raw of parsed.topics) {
           const topic = normalizeTopic(raw)
-          if (topic !== undefined) state.topics.push(topic)
+          if (topic === undefined) continue
+          /* v2 appended `prompt` after the default text; keep what it injected. */
+          if (!(parsed.version >= 3) && topic.prompt.trim() !== '') {
+            topic.prompt = `${defaultPrompt(topic)}\n\n${topic.prompt.trim()}`
+            migrated = true
+          }
+          state.topics.push(topic)
         }
       }
       if (typeof parsed.bindings === 'object' && parsed.bindings !== null) {
@@ -120,6 +132,7 @@ export function apply(ctx) {
           if (typeof topicId === 'string' && state.topics.some((topic) => topic.id === topicId)) state.bindings[sessionId] = topicId
         }
       }
+      if (migrated) await persist()
     } catch (error) {
       if (error?.code !== 'ENOENT') ctx.logger?.warn?.(`topics: could not read ${file}: ${String(error)}`)
     }
@@ -429,7 +442,10 @@ export function apply(ctx) {
         if (typeof body.prompt !== 'string') return await respond({ error: 'prompt must be a string' })
         const index = state.topics.findIndex((topic) => topic.id === id)
         if (index === -1) return await respond({ error: `unknown topic "${id}"` })
-        state.topics[index] = { ...state.topics[index], prompt: body.prompt, updatedAt: now() }
+        /* Empty, or exactly the default, stores nothing so the default keeps following renames. */
+        const text = body.prompt.trim()
+        const prompt = text === '' || text === defaultPrompt(state.topics[index]) ? '' : text
+        state.topics[index] = { ...state.topics[index], prompt, updatedAt: now() }
         await persist()
         return json(await view())
       })

@@ -59,7 +59,7 @@ window.__ModuleLoader__.load({
       'detailsTitle': '话题详情',
       'detailsPrompt': '注入给模型的提示词',
       'detailsEditAria': '编辑提示词',
-      'detailsEditPlaceholder': '例如：回答用中文；相关笔记……；优先用 xxx 技能',
+      'detailsEditPlaceholder': '留空则使用默认（# Topic: 话题名 …）',
       'detailsSave': '保存',
       'detailsSaving': '正在保存…',
       'detailsSessions': '会话',
@@ -112,7 +112,7 @@ window.__ModuleLoader__.load({
       'detailsTitle': 'Topic details',
       'detailsPrompt': 'Prompt injected into the model',
       'detailsEditAria': 'Edit prompt',
-      'detailsEditPlaceholder': 'e.g. Answer in Chinese; notes…; prefer the xxx skill',
+      'detailsEditPlaceholder': 'Leave empty to use the default (# Topic: name …)',
       'detailsSave': 'Save',
       'detailsSaving': 'Saving…',
       'detailsSessions': 'Sessions',
@@ -656,7 +656,8 @@ window.__ModuleLoader__.load({
           status.hidden = true
           cancelEdit = editing ? () => setEditing(false) : null
           if (editing) {
-            editor.value = typeof current.prompt === 'string' && current.prompt !== current.rendered ? current.prompt : ''
+            /* What you see is what is injected: edit the effective text itself. */
+            editor.value = prompt.textContent
             requestAnimationFrame(() => editor.focus())
           }
         }
