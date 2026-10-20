@@ -19,6 +19,7 @@ const STATE_VERSION = 2
 const ROUTE_STATE = '/api/topics.state'
 const ROUTE_CREATE = '/api/topics.create'
 const ROUTE_RENAME = '/api/topics.rename'
+const ROUTE_UPDATE = '/api/topics.update'
 const ROUTE_DELETE = '/api/topics.delete'
 const ROUTE_SESSION = '/api/topics.session'
 const ROUTE_BIND = '/api/topics.bind'
@@ -52,6 +53,8 @@ function normalizeTopic(value, fallbackId) {
   return {
     id,
     title,
+    /* Free text appended to the topic section: instructions, notes, skill names. */
+    prompt: typeof value.prompt === 'string' ? value.prompt : '',
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : now(),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now(),
   }
@@ -64,7 +67,9 @@ function normalizeTopic(value, fallbackId) {
  */
 function renderTopic(topic) {
   if (topic === undefined) return ''
-  return `# Topic: ${topic.title}\n\nThis Session belongs to the "${topic.title}" topic.`
+  const head = `# Topic: ${topic.title}\n\nThis Session belongs to the "${topic.title}" topic.`
+  const extra = typeof topic.prompt === 'string' ? topic.prompt.trim() : ''
+  return extra === '' ? head : `${head}\n\n${extra}`
 }
 
 /**
@@ -264,7 +269,7 @@ export function apply(ctx) {
         ...topic,
         /* The exact text this topic adds to a bound Session's system prompt, so
            the sidebar menu can show what a topic actually contributes. */
-        prompt: renderTopic(topic),
+        rendered: renderTopic(topic),
         sessionIds: members.get(topic.id) ?? [],
         sessions: (members.get(topic.id) ?? []).map((sessionId) => ({ sessionId, title: titles[sessionId] ?? '' })),
       })),
@@ -403,6 +408,26 @@ export function apply(ctx) {
         state.topics[index] = { ...state.topics[index], title, updatedAt: now() }
         await persist()
         /* Section text is a provider read at assembly time, so edits apply without re-registering. */
+        return json(await view())
+      })
+    },
+  })
+
+  /* Edit the topic's own prompt text; bound Sessions read it at assembly time. */
+  ctx.connection.fetch.register({
+    path: ROUTE_UPDATE,
+    methods: ['POST'],
+    requestBody: 'buffered',
+    fetch: async (request) => {
+      const body = await readJson(request)
+      return serialize(async () => {
+        await load()
+        const id = typeof body.id === 'string' ? body.id : ''
+        if (typeof body.prompt !== 'string') return await respond({ error: 'prompt must be a string' })
+        const index = state.topics.findIndex((topic) => topic.id === id)
+        if (index === -1) return await respond({ error: `unknown topic "${id}"` })
+        state.topics[index] = { ...state.topics[index], prompt: body.prompt, updatedAt: now() }
+        await persist()
         return json(await view())
       })
     },

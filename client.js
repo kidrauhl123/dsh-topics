@@ -59,6 +59,11 @@ window.__ModuleLoader__.load({
       'detailsTitle': '话题详情',
       'detailsPrompt': '注入给模型的提示词',
       'detailsPromptHint': '绑定的会话每次组装提示词时都会带上这一段。',
+      'detailsEdit': '话题提示词（可写说明、笔记、要用的技能）',
+      'detailsEditPlaceholder': '例如：回答用中文；相关笔记……；优先用 xxx 技能',
+      'detailsSave': '保存',
+      'detailsSaving': '正在保存…',
+      'detailsSaved': '已保存',
       'detailsSessions': '会话',
       'detailsCreated': '创建于',
       'detailsNoSessions': '还没有会话',
@@ -109,6 +114,11 @@ window.__ModuleLoader__.load({
       'detailsTitle': 'Topic details',
       'detailsPrompt': 'Prompt injected into the model',
       'detailsPromptHint': 'Every bound Session carries this text when its prompt is assembled.',
+      'detailsEdit': 'Topic prompt (instructions, notes, skills to use)',
+      'detailsEditPlaceholder': 'e.g. Answer in Chinese; notes…; prefer the xxx skill',
+      'detailsSave': 'Save',
+      'detailsSaving': 'Saving…',
+      'detailsSaved': 'Saved',
       'detailsSessions': 'Sessions',
       'detailsCreated': 'Created',
       'detailsNoSessions': 'No Sessions yet',
@@ -309,6 +319,7 @@ window.__ModuleLoader__.load({
         refresh,
         create: (title) => request('api/topics.create', { title }),
         rename: (id, title) => request('api/topics.rename', { id, title }),
+        update: (id, prompt) => request('api/topics.update', { id, prompt }),
         remove: (id) => request('api/topics.delete', { id }),
         createSession: (id) => request('api/topics.session', { id }),
         bind: (sessionId, topicId) => request('api/topics.bind', { sessionId, topicId }),
@@ -525,7 +536,7 @@ window.__ModuleLoader__.load({
      * @param t - locale translator for this namespace.
      * @returns `open` and `close`.
      */
-    function createDetailsDialog(t) {
+    function createDetailsDialog(t, store) {
       let scrim = null
 
       const close = () => {
@@ -593,19 +604,64 @@ window.__ModuleLoader__.load({
         prompt.className = 'dsh-topics-prompt'
         /* The Host sends the assembled section; derive it when an older Host is
            still running, so the sheet is never blank. */
-        prompt.textContent = typeof topic.prompt === 'string' && topic.prompt !== ''
-          ? topic.prompt
-          : `# Topic: ${topic.title}\n\nThis Session belongs to the "${topic.title}" topic.`
-        body.append(promptLabel, prompt)
+        const showRendered = (value) => {
+          prompt.textContent = typeof value.rendered === 'string' && value.rendered !== ''
+            ? value.rendered
+            : `# Topic: ${value.title}\n\nThis Session belongs to the "${value.title}" topic.`
+        }
+        showRendered(topic)
+
+        /* The editable part: the topic's own prompt text. */
+        const editKey = document.createElement('span')
+        editKey.className = 'dsh-topics-detailKey'
+        editKey.style.width = 'auto'
+        editKey.textContent = t('detailsEdit')
+        const editor = document.createElement('textarea')
+        editor.className = 'dsh-topics-input'
+        editor.style.height = '140px'
+        editor.style.marginTop = '0'
+        editor.style.resize = 'vertical'
+        editor.spellcheck = false
+        editor.placeholder = t('detailsEditPlaceholder')
+        editor.value = typeof topic.prompt === 'string' && topic.prompt !== topic.rendered ? topic.prompt : ''
+        const status = document.createElement('p')
+        status.className = 'dsh-topics-error'
+        status.setAttribute('role', 'alert')
+        status.hidden = true
+        body.append(editKey, editor, status, promptLabel, prompt)
 
         const footer = document.createElement('div')
         footer.className = 'dsh-topics-footer'
         const closeEl = document.createElement('button')
         closeEl.type = 'button'
-        closeEl.className = 'dsh-topics-btn dsh-topics-btn--primary'
+        closeEl.className = 'dsh-topics-btn dsh-topics-btn--plain'
         closeEl.textContent = t('close')
         closeEl.addEventListener('click', close)
-        footer.append(closeEl)
+        const saveEl = document.createElement('button')
+        saveEl.type = 'button'
+        saveEl.className = 'dsh-topics-btn dsh-topics-btn--primary'
+        saveEl.textContent = t('detailsSave')
+        saveEl.addEventListener('click', async () => {
+          if (saveEl.disabled) return
+          saveEl.disabled = true
+          saveEl.textContent = t('detailsSaving')
+          status.hidden = true
+          try {
+            const value = await store.update(topic.id, editor.value)
+            const next = Array.isArray(value?.topics) ? value.topics.find((item) => item.id === topic.id) : undefined
+            if (next !== undefined) showRendered(next)
+            status.style.color = 'var(--dsw-alias-label-tertiary)'
+            status.textContent = t('detailsSaved')
+          } catch (error) {
+            status.style.color = ''
+            status.textContent = String(error?.message ?? error)
+          } finally {
+            status.hidden = false
+            saveEl.disabled = false
+            saveEl.textContent = t('detailsSave')
+          }
+        })
+        footer.append(closeEl, saveEl)
 
         panel.append(title, body, footer)
         scrim.append(panel)
@@ -614,7 +670,7 @@ window.__ModuleLoader__.load({
         })
         document.body.append(scrim)
         document.addEventListener('keydown', onKey, true)
-        requestAnimationFrame(() => closeEl.focus())
+        requestAnimationFrame(() => editor.focus())
       }
 
       return { open, close }
@@ -1697,7 +1753,7 @@ window.__ModuleLoader__.load({
         const t = ctx.locale.bind(NS)
         const store = createTopicStore()
         const dialog = createNameDialog(t)
-        const details = createDetailsDialog(t)
+        const details = createDetailsDialog(t, store)
         void store.refresh()
 
         ctx.effect(() => dialog.close, 'topics: dialog')
