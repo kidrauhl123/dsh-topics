@@ -58,12 +58,10 @@ window.__ModuleLoader__.load({
       'details': '详情',
       'detailsTitle': '话题详情',
       'detailsPrompt': '注入给模型的提示词',
-      'detailsPromptHint': '绑定的会话每次组装提示词时都会带上这一段。',
-      'detailsEdit': '话题提示词（可写说明、笔记、要用的技能）',
+      'detailsEditAria': '编辑提示词',
       'detailsEditPlaceholder': '例如：回答用中文；相关笔记……；优先用 xxx 技能',
       'detailsSave': '保存',
       'detailsSaving': '正在保存…',
-      'detailsSaved': '已保存',
       'detailsSessions': '会话',
       'detailsCreated': '创建于',
       'detailsNoSessions': '还没有会话',
@@ -113,12 +111,10 @@ window.__ModuleLoader__.load({
       'details': 'Details',
       'detailsTitle': 'Topic details',
       'detailsPrompt': 'Prompt injected into the model',
-      'detailsPromptHint': 'Every bound Session carries this text when its prompt is assembled.',
-      'detailsEdit': 'Topic prompt (instructions, notes, skills to use)',
+      'detailsEditAria': 'Edit prompt',
       'detailsEditPlaceholder': 'e.g. Answer in Chinese; notes…; prefer the xxx skill',
       'detailsSave': 'Save',
       'detailsSaving': 'Saving…',
-      'detailsSaved': 'Saved',
       'detailsSessions': 'Sessions',
       'detailsCreated': 'Created',
       'detailsNoSessions': 'No Sessions yet',
@@ -237,6 +233,11 @@ window.__ModuleLoader__.load({
 .dsh-topics-detailKey{flex:none;width:72px;color:var(--dsw-alias-label-tertiary)}
 .dsh-topics-detailValue{flex:1;min-width:0;color:var(--dsw-alias-label-primary);word-break:break-word}
 .dsh-topics-prompt{margin:2px 0 0;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family-mono,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12px;line-height:18px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}
+.dsh-topics-promptBox{position:relative}
+.dsh-topics-promptBox [hidden]{display:none!important}
+.dsh-topics-promptBox .dsh-topics-prompt{padding-right:34px}
+.dsh-topics-promptEdit{position:absolute;top:8px;right:8px}
+.dsh-topics-promptActions{display:flex;justify-content:flex-end;gap:8px;margin-top:8px}
 .dsh-topics-promptHint{margin:0;color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}
 
 /* Empty topics are a normal state; the hint sits where a Session title would. */
@@ -538,19 +539,23 @@ window.__ModuleLoader__.load({
      */
     function createDetailsDialog(t, store) {
       let scrim = null
+      /** Leaves edit mode when the prompt box is being edited. */
+      let cancelEdit = null
 
       const close = () => {
         if (scrim === null) return
         document.removeEventListener('keydown', onKey, true)
         scrim.remove()
         scrim = null
+        cancelEdit = null
       }
 
       function onKey(event) {
         if (event.key !== 'Escape') return
         event.preventDefault()
         event.stopPropagation()
-        close()
+        if (cancelEdit !== null) cancelEdit()
+        else close()
       }
 
       const open = (topic) => {
@@ -595,11 +600,14 @@ window.__ModuleLoader__.load({
         promptLabel.className = 'dsh-topics-detailRow'
         const promptKey = document.createElement('span')
         promptKey.className = 'dsh-topics-detailKey'
+        promptKey.style.width = 'auto'
         promptKey.textContent = t('detailsPrompt')
-        const promptHint = document.createElement('p')
-        promptHint.className = 'dsh-topics-promptHint'
-        promptHint.textContent = t('detailsPromptHint')
-        promptLabel.append(promptKey, promptHint)
+        promptLabel.append(promptKey)
+
+        /* One box: a preview of the injected section, switched in place to an
+           editor for the topic's own prompt text by the pencil. */
+        const box = document.createElement('div')
+        box.className = 'dsh-topics-promptBox'
         const prompt = document.createElement('pre')
         prompt.className = 'dsh-topics-prompt'
         /* The Host sends the assembled section; derive it when an older Host is
@@ -609,13 +617,15 @@ window.__ModuleLoader__.load({
             ? value.rendered
             : `# Topic: ${value.title}\n\nThis Session belongs to the "${value.title}" topic.`
         }
-        showRendered(topic)
+        let current = topic
+        showRendered(current)
+        const editEl = document.createElement('button')
+        editEl.type = 'button'
+        editEl.className = 'dsh-topics-iconButton dsh-topics-promptEdit'
+        editEl.title = t('detailsEditAria')
+        editEl.setAttribute('aria-label', t('detailsEditAria'))
+        editEl.append(editElement(14))
 
-        /* The editable part: the topic's own prompt text. */
-        const editKey = document.createElement('span')
-        editKey.className = 'dsh-topics-detailKey'
-        editKey.style.width = 'auto'
-        editKey.textContent = t('detailsEdit')
         const editor = document.createElement('textarea')
         editor.className = 'dsh-topics-input'
         editor.style.height = '140px'
@@ -623,24 +633,36 @@ window.__ModuleLoader__.load({
         editor.style.resize = 'vertical'
         editor.spellcheck = false
         editor.placeholder = t('detailsEditPlaceholder')
-        editor.value = typeof topic.prompt === 'string' && topic.prompt !== topic.rendered ? topic.prompt : ''
         const status = document.createElement('p')
         status.className = 'dsh-topics-error'
         status.setAttribute('role', 'alert')
-        status.hidden = true
-        body.append(editKey, editor, status, promptLabel, prompt)
-
-        const footer = document.createElement('div')
-        footer.className = 'dsh-topics-footer'
-        const closeEl = document.createElement('button')
-        closeEl.type = 'button'
-        closeEl.className = 'dsh-topics-btn dsh-topics-btn--plain'
-        closeEl.textContent = t('close')
-        closeEl.addEventListener('click', close)
+        const actions = document.createElement('div')
+        actions.className = 'dsh-topics-promptActions'
+        const cancelEl = document.createElement('button')
+        cancelEl.type = 'button'
+        cancelEl.className = 'dsh-topics-btn dsh-topics-btn--plain dsh-topics-btn--sm'
+        cancelEl.textContent = t('cancel')
         const saveEl = document.createElement('button')
         saveEl.type = 'button'
-        saveEl.className = 'dsh-topics-btn dsh-topics-btn--primary'
+        saveEl.className = 'dsh-topics-btn dsh-topics-btn--primary dsh-topics-btn--sm'
         saveEl.textContent = t('detailsSave')
+        actions.append(cancelEl, saveEl)
+
+        const setEditing = (editing) => {
+          prompt.hidden = editing
+          editEl.hidden = editing
+          editor.hidden = !editing
+          actions.hidden = !editing
+          status.hidden = true
+          cancelEdit = editing ? () => setEditing(false) : null
+          if (editing) {
+            editor.value = typeof current.prompt === 'string' && current.prompt !== current.rendered ? current.prompt : ''
+            requestAnimationFrame(() => editor.focus())
+          }
+        }
+        setEditing(false)
+        editEl.addEventListener('click', () => setEditing(true))
+        cancelEl.addEventListener('click', () => setEditing(false))
         saveEl.addEventListener('click', async () => {
           if (saveEl.disabled) return
           saveEl.disabled = true
@@ -649,19 +671,28 @@ window.__ModuleLoader__.load({
           try {
             const value = await store.update(topic.id, editor.value)
             const next = Array.isArray(value?.topics) ? value.topics.find((item) => item.id === topic.id) : undefined
-            if (next !== undefined) showRendered(next)
-            status.style.color = 'var(--dsw-alias-label-tertiary)'
-            status.textContent = t('detailsSaved')
+            if (next !== undefined) current = next
+            showRendered(current)
+            setEditing(false)
           } catch (error) {
-            status.style.color = ''
             status.textContent = String(error?.message ?? error)
-          } finally {
             status.hidden = false
+          } finally {
             saveEl.disabled = false
             saveEl.textContent = t('detailsSave')
           }
         })
-        footer.append(closeEl, saveEl)
+        box.append(prompt, editEl, editor, status, actions)
+        body.append(promptLabel, box)
+
+        const footer = document.createElement('div')
+        footer.className = 'dsh-topics-footer'
+        const closeEl = document.createElement('button')
+        closeEl.type = 'button'
+        closeEl.className = 'dsh-topics-btn dsh-topics-btn--primary'
+        closeEl.textContent = t('close')
+        closeEl.addEventListener('click', close)
+        footer.append(closeEl)
 
         panel.append(title, body, footer)
         scrim.append(panel)
@@ -670,7 +701,7 @@ window.__ModuleLoader__.load({
         })
         document.body.append(scrim)
         document.addEventListener('keydown', onKey, true)
-        requestAnimationFrame(() => editor.focus())
+        requestAnimationFrame(() => closeEl.focus())
       }
 
       return { open, close }
@@ -866,6 +897,18 @@ window.__ModuleLoader__.load({
         { d: 'M8 9C8.55228 9 9 8.55228 9 8C9 7.44772 8.55228 7 8 7C7.44772 7 7 7.44772 7 8C7 8.55228 7.44772 9 8 9Z', fill: 'currentColor', stroke: 'none' },
         { d: 'M13 9C13.5523 9 14 8.55228 14 8C14 7.44772 13.5523 7 13 7C12.4477 7 12 7.44772 12 8C12 8.55228 12.4477 9 13 9Z', fill: 'currentColor', stroke: 'none' },
       ], { fill: 'currentColor', stroke: false })
+    }
+
+    /**
+     * The shipped edit icon (`IconEditOutlineRegular`, 16x16).
+     * @param size - square edge in pixels.
+     * @returns the SVG element.
+     */
+    function editElement(size) {
+      return iconElement(size, '0 0 16 16', [
+        { d: 'M8.85596 2.69971H4.19971C3.37141 2.69971 2.69992 3.37146 2.69971 4.19971V11.8003C2.69992 12.6285 3.37141 13.3003 4.19971 13.3003H11.8003C12.6283 13.2999 13.3001 12.6283 13.3003 11.8003V7.89893H14.3003V11.8003C14.3001 13.1806 13.1806 14.2999 11.8003 14.3003H4.19971C2.81913 14.3003 1.69992 13.1808 1.69971 11.8003V4.19971C1.69992 2.81918 2.81913 1.69971 4.19971 1.69971H8.85596V2.69971Z', fill: 'currentColor', stroke: 'none' },
+        { d: 'M7.7849 8.23878L13.888 2.13574', stroke: 'currentColor' },
+      ], { fill: 'none', 'stroke-width': '1' })
     }
 
     /**
