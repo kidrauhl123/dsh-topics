@@ -1335,7 +1335,13 @@ window.__ModuleLoader__.load({
                 })
                 /* The shipped row highlights the selected Session; a topic row is
                    the same Session, so it carries the same selected surface. */
-                if (session.sessionId === currentSessionId()) sessionRow.setAttribute('data-selected', '1')
+                const selected = session.sessionId === currentSessionId()
+                if (selected) {
+                  sessionRow.setAttribute('data-selected', '1')
+                  sessionRow.setAttribute('aria-selected', 'true')
+                } else {
+                  sessionRow.setAttribute('aria-selected', 'false')
+                }
                 sessionRow.append(slot, sessionTitle)
                 const isPinned = options.isPinned(session.sessionId)
                 const isArchived = options.isArchived(session.sessionId)
@@ -1389,6 +1395,42 @@ window.__ModuleLoader__.load({
                     menuApi.open?.()
                   })
                 }
+
+                /* Same open path as SessionNodeItem → uiWorkspace.openSession
+                   (replaceMain / reveal). Action buttons stopPropagation so they
+                   do not open. Native has no middle-click handler on the row. */
+                const openSession = () => options.openSession(session.sessionId)
+                sessionRow.addEventListener('click', openSession)
+                sessionRow.addEventListener('keydown', (event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  openSession()
+                })
+                sessionRow.addEventListener('dragstart', (event) => {
+                  drag = { kind: 'session', id: session.sessionId, topicId: topic.id }
+                  event.dataTransfer?.setData('text/plain', session.sessionId)
+                  if (event.dataTransfer !== undefined && event.dataTransfer !== null) event.dataTransfer.effectAllowed = 'move'
+                })
+                sessionRow.addEventListener('dragend', () => {
+                  drag = null
+                  clearDropMarks()
+                })
+                sessionRow.addEventListener('dragover', (event) => {
+                  if (drag === null) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  clearDropMarks()
+                  if (drag.kind === 'session') sessionRow.setAttribute('data-drop', halfOf(event, sessionRow))
+                  else section.setAttribute('data-drop', halfOf(event, sessionRow))
+                })
+                sessionRow.addEventListener('drop', (event) => {
+                  if (drag === null) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  clearDropMarks()
+                  if (drag.kind === 'session') commitSessionDrop(topic.id, sessionRow, halfOf(event, sessionRow))
+                  else commitTopicDrop(section, halfOf(event, sessionRow))
+                })
 
                 section.append(sessionRow)
               }
