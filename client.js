@@ -92,6 +92,8 @@ window.__ModuleLoader__.load({
       'menu.pinSession': '置顶会话',
       'menu.unpinSession': '取消置顶',
       'menu.renameSession': '重命名',
+      'rename.session.title': '重命名会话',
+      'rename.session.hint': '会话名称',
       'menu.fork': '分叉会话',
       'menu.archiveSession': '归档会话',
       'menu.unarchiveSession': '取消归档',
@@ -151,6 +153,8 @@ window.__ModuleLoader__.load({
       'menu.pinSession': 'Pin session',
       'menu.unpinSession': 'Unpin session',
       'menu.renameSession': 'Rename',
+      'rename.session.title': 'Rename Session',
+      'rename.session.hint': 'Session name',
       'menu.fork': 'Fork session',
       'menu.archiveSession': 'Archive session',
       'menu.unarchiveSession': 'Unarchive session',
@@ -515,16 +519,16 @@ window.__ModuleLoader__.load({
         title.textContent = options.title
         const hint = document.createElement('p')
         hint.className = 'dsh-topics-dialog-hint'
-        hint.textContent = t('nameLabel')
+        hint.textContent = options.hint ?? t('nameLabel')
 
         input = document.createElement('input')
         input.className = 'dsh-topics-input'
         input.type = 'text'
         input.autocomplete = 'off'
         input.spellcheck = false
-        input.placeholder = t('namePlaceholder')
+        input.placeholder = options.placeholder ?? t('namePlaceholder')
         input.value = options.value ?? ''
-        input.setAttribute('aria-label', t('nameLabel'))
+        input.setAttribute('aria-label', options.hint ?? t('nameLabel'))
 
         errorEl = document.createElement('p')
         errorEl.className = 'dsh-topics-error'
@@ -1368,13 +1372,7 @@ window.__ModuleLoader__.load({
                 sessionTitle.addEventListener('dblclick', (event) => {
                   if (isBlank) return
                   event.stopPropagation()
-                  const nativeRow = nativeRows.get(session.sessionId)
-                  const nativeTitle = nativeRow?.querySelector?.('[class*="title"]')
-                  if (nativeTitle) {
-                    nativeTitle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
-                  } else {
-                    options.renameSession(session)
-                  }
+                  options.renameSession(session)
                 })
                 /* The shipped row highlights the selected Session; a topic row is
                    the same Session, so it carries the same selected surface. */
@@ -1876,6 +1874,29 @@ window.__ModuleLoader__.load({
         const sessions = ctx.get?.('sessions') ?? ctx.sessions
         const uiSession = ctx.get?.('uiSession') ?? ctx.uiSession
 
+        /* The shipped Session menu items (pin / rename / fork / archive /
+           session id) keep their actions in their slot entry's inject face
+           (StoredEntry: options.id + inject).
+           Reading that face gives a topic row the very same actions — the same
+           rename dialog, archive confirmation and toasts — instead of a lookalike. */
+        const nativeSessionAction = (entryId, name) => {
+          try {
+            const entry = ctx.slots.entries('sidebar.workspaces.session.menu.item')
+              .find((candidate) => (candidate?.options?.id ?? candidate?.id) === entryId && typeof candidate?.inject === 'function')
+            const action = entry?.inject?.()?.[name]
+            return typeof action === 'function' ? action : undefined
+          } catch {
+            return undefined
+          }
+        }
+        const sessionDisplayTitle = (sessionId, fallback) => {
+          try {
+            const row = sessions?.list?.getSnapshot?.()?.byId?.[sessionId]
+            if (row !== undefined) return row.blank ? '' : (row.title?.trim?.() ?? '')
+          } catch { /* fall through */ }
+          return fallback ?? ''
+        }
+
         /* The sidebar has no group-level slot, so topics are rendered as peer
            groups beside the shipped workspace groups. */
         ctx.effect(() => mountTopicGroups({
@@ -1900,29 +1921,48 @@ window.__ModuleLoader__.load({
             }
           },
           pinSession: (sessionId) => {
+            const native = nativeSessionAction('pin', 'pinSession')
+            if (native !== undefined) return native(sessionId)
             ctx.uiWorkspace.pinSession(sessionId).catch((err) => {
               ctx.logger?.warn?.(`topics: could not pin session: ${String(err?.message ?? err)}`)
             })
           },
           unpinSession: (sessionId) => {
+            const native = nativeSessionAction('pin', 'unpinSession')
+            if (native !== undefined) return native(sessionId)
             ctx.uiWorkspace.unpinSession(sessionId).catch((err) => {
               ctx.logger?.warn?.(`topics: could not unpin session: ${String(err?.message ?? err)}`)
             })
           },
           archiveSession: (sessionId) => {
+            const native = nativeSessionAction('archive', 'archiveSession')
+            if (native !== undefined) return native(sessionId)
             ctx.uiWorkspace.archiveSession(sessionId).catch((err) => {
               ctx.logger?.warn?.(`topics: could not archive session: ${String(err?.message ?? err)}`)
             })
           },
           unarchiveSession: (sessionId) => {
+            const native = nativeSessionAction('archive', 'unarchiveSession')
+            if (native !== undefined) return native(sessionId)
             ctx.uiWorkspace.unarchiveSession(sessionId).catch((err) => {
               ctx.logger?.warn?.(`topics: could not unarchive session: ${String(err?.message ?? err)}`)
             })
           },
           renameSession: (session) => {
+            /* Same hop as the shipped row's 重命名: raise the shipped Session
+               rename dialog for this Session id. The topic name dialog is only
+               a fallback, with Session wording, for a build without it. */
+            const title = sessionDisplayTitle(session.sessionId, session.title)
+            const request = nativeSessionAction('rename', 'requestSessionRename')
+            if (request !== undefined) {
+              request(session.sessionId, title)
+              return
+            }
             dialog.open({
-              title: t('rename.session.title', '重命名会话'),
-              value: session.title,
+              title: t('rename.session.title'),
+              hint: t('rename.session.hint'),
+              placeholder: '',
+              value: title,
               confirmLabel: t('renameConfirm'),
               onSubmit: async (newName) => {
                 if (typeof sessions?.using === 'function') {
@@ -1943,6 +1983,8 @@ window.__ModuleLoader__.load({
             }
           },
           copySessionId: (sessionId) => {
+            const native = nativeSessionAction('session-id', 'copySessionId')
+            if (native !== undefined) return void native(sessionId)
             if (navigator?.clipboard?.writeText) {
               navigator.clipboard.writeText(sessionId).catch(() => {})
             }
