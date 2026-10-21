@@ -38,6 +38,7 @@ window.__ModuleLoader__.load({
       IconBranchOutlineRegular,
       IconCopyOutlineRegular,
       IconCheckOutlineRegular,
+      StateDot,
     } = ui
 
     const NS = 'topics'
@@ -78,13 +79,16 @@ window.__ModuleLoader__.load({
       'detailsEditPlaceholder': '留空则使用默认（# Topic: 话题名 …）',
       'detailsSave': '保存',
       'detailsSaving': '正在保存…',
-      'detailsSessions': '会话',
       'detailsCreated': '创建于',
-      'detailsNoSessions': '还没有会话',
       'close': '关闭',
       'group.empty': '还没有会话',
       'group.untitled': '未命名会话',
       'row.new': '新会话',
+      'status.running': '运行中',
+      'status.waitingApproval': '等待批准',
+      'status.planReview': '等待审阅计划',
+      'status.waitingAnswer': '等待回答',
+      'status.completed': '已完成',
       'menu.pinSession': '置顶会话',
       'menu.unpinSession': '取消置顶',
       'menu.renameSession': '重命名',
@@ -134,13 +138,16 @@ window.__ModuleLoader__.load({
       'detailsEditPlaceholder': 'Leave empty to use the default (# Topic: name …)',
       'detailsSave': 'Save',
       'detailsSaving': 'Saving…',
-      'detailsSessions': 'Sessions',
       'detailsCreated': 'Created',
-      'detailsNoSessions': 'No Sessions yet',
       'close': 'Close',
       'group.empty': 'No Sessions yet',
       'group.untitled': 'Untitled Session',
       'row.new': 'New Session',
+      'status.running': 'Running',
+      'status.waitingApproval': 'Waiting for approval',
+      'status.planReview': 'Waiting for plan review',
+      'status.waitingAnswer': 'Waiting for an answer',
+      'status.completed': 'Completed',
       'menu.pinSession': 'Pin session',
       'menu.unpinSession': 'Unpin session',
       'menu.renameSession': 'Rename',
@@ -244,6 +251,7 @@ window.__ModuleLoader__.load({
 .dsh-topics-sessionRow{box-sizing:border-box;display:flex;align-items:center;gap:0;height:32px;padding:0 8px;padding-inline-start:calc(8px + var(--dsh-workspace-indent,0px));border-radius:var(--dsw-radius-md);color:var(--dsw-alias-label-primary);cursor:pointer;user-select:none}
 .dsh-topics-sessionRow:hover,.dsh-topics-sessionRow[data-selected="1"],.dsh-topics-sessionRow[data-menu="1"]{background:var(--dsw-alias-interactive-bg-hover)}
 .dsh-topics-sessionRow:focus-visible{outline:var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color,var(--dsw-alias-brand-primary));outline-offset:-2px}
+.dsh-topics-visuallyHidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 .dsh-topics-sessionSlot{flex:none;display:inline-flex;align-items:center;justify-content:center;width:16px;height:20px}
 .dsh-topics-sessionTitle{flex:1;min-width:0;margin:0 6px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:20px}
 @media (hover:hover){.dsh-topics-sessionRow:hover .dsh-topics-sessionTitle,.dsh-topics-sessionRow[data-menu="1"] .dsh-topics-sessionTitle{text-overflow:clip}}
@@ -614,10 +622,6 @@ window.__ModuleLoader__.load({
         if (created !== null && !Number.isNaN(created.getTime())) {
           body.append(row(t('detailsCreated'), created.toLocaleString()))
         }
-        const sessions = Array.isArray(topic.sessions) ? topic.sessions : []
-        body.append(row(t('detailsSessions'), sessions.length === 0
-          ? t('detailsNoSessions')
-          : sessions.map((session) => session.title === '' ? t('group.untitled') : session.title).join('、')))
 
         const promptLabel = document.createElement('div')
         promptLabel.className = 'dsh-topics-detailRow'
@@ -1117,6 +1121,38 @@ window.__ModuleLoader__.load({
           return undefined
         }
       }
+      /* A Session's run state, derived exactly as the shipped row derives it
+         (dsh-client-ui-workspace sessionNode + sessionStatuses): a pending
+         interaction leads, then live activity (own turn or running subagents),
+         then the unread-completion reminder, else idle. It reads the same
+         sources — the uiSession status store and the Session catalog — so a
+         topic row no longer depends on the shipped row being rendered. */
+      const statusSnapshot = () => {
+        try {
+          return options.sessionStatus?.getSnapshot?.()
+        } catch {
+          return undefined
+        }
+      }
+      const statusOf = (sessionId) => {
+        const list = sessionState()
+        const statuses = statusSnapshot()
+        const status = statuses?.get?.(sessionId)
+        const byId = list?.byId ?? {}
+        const kind = status?.pendingInteraction?.kind
+        if (kind === 'approval') return { state: 'warning', label: t('status.waitingApproval') }
+        if (kind === 'plan-review') return { state: 'warning', label: t('status.planReview') }
+        if (kind === 'question') return { state: 'warning', label: t('status.waitingAnswer') }
+        if ((status?.running ?? byId[sessionId]?.running) === true) return { state: 'ongoing', label: t('status.running') }
+        const children = list?.projectionsBySession?.[sessionId]?.values?.subagentCatalog ?? []
+        const runningChildren = Array.isArray(children)
+          ? children.filter((child) => (statuses?.get?.(child.id)?.running ?? byId[child.id]?.running) === true).length
+          : 0
+        if (runningChildren > 0) return { state: 'ongoing', label: t('status.running') }
+        if (status?.completionUnread === true) return { state: 'done', label: t('status.completed') }
+        return { state: 'idle', label: '' }
+      }
+
       const blankSessions = () => {
         const state = sessionState()
         if (state === undefined) return []
@@ -1296,16 +1332,23 @@ window.__ModuleLoader__.load({
                    group already says which topic this Session belongs to. */
                 const slot = document.createElement('span')
                 slot.className = 'dsh-topics-sessionSlot'
-                /* Copy the shipped state cell verbatim: the same dot, the same
-                   spinner, driven by the same stylesheet. The shipped slot also
-                   carries our own "#" mark (see SessionTopicMark); strip it from
-                   the copy, because the group already says which topic this
-                   Session belongs to. */
-                const statusCell = nativeRows.get(session.sessionId)?.firstElementChild ?? fallbackStatus
-                if (statusCell !== null && statusCell !== undefined) {
-                  const copy = statusCell.cloneNode(true)
-                  for (const mark of copy.querySelectorAll('.dsh-topics-mark')) mark.remove()
-                  slot.append(copy)
+                /* Same rule as the shipped slot: archived and blank rows lead
+                   with nothing; an idle row shows the leading slot (only our own
+                   "#" mark, which the group already implies, so nothing); any
+                   other state shows the shipped StateDot for that state. The
+                   state is read live per Session, never copied from another
+                   row: the shipped list only renders its first few rows, and
+                   copying a stand-in cell made idle Sessions spin. */
+                const live = statusOf(session.sessionId)
+                if (live.state !== 'idle' && !options.isArchived(session.sessionId) && sessionState()?.byId?.[session.sessionId]?.blank !== true && typeof StateDot === 'function') {
+                  const dotHost = document.createElement('span')
+                  dotHost.style.display = 'contents'
+                  slot.append(dotHost)
+                  const dotRoot = createRoot(dotHost)
+                  reactRoots.push(dotRoot)
+                  dotRoot.render(h(React.Fragment, null,
+                    h(StateDot, { state: live.state }),
+                    h('span', { className: 'dsh-topics-visuallyHidden' }, live.label)))
                 }
                 const sessionTitle = document.createElement('span')
                 sessionTitle.className = 'dsh-topics-sessionTitle'
@@ -1458,7 +1501,6 @@ window.__ModuleLoader__.load({
          exactly as it does under its workspace. */
       const nativeRows = new Map()
       const reactRoots = []
-      let fallbackStatus = null
       const hideBound = (snapshot) => {
         const bound = new Set()
         for (const topic of snapshot.topics) for (const sessionId of topic.sessionIds ?? []) bound.add(sessionId)
@@ -1473,7 +1515,6 @@ window.__ModuleLoader__.load({
             const label = titleEl?.textContent?.trim() ?? ''
             if (label !== '') nativeTitles.set(sessionId, label)
             nativeRows.set(sessionId, row)
-            if (fallbackStatus === null && row.firstElementChild !== null) fallbackStatus = row.firstElementChild
             if (bound.has(sessionId)) {
               row.style.display = 'none'
               hidden.add(sessionId)
@@ -1504,6 +1545,7 @@ window.__ModuleLoader__.load({
               session.sessionId,
               session.title,
               options.isPinned(session.sessionId),
+              statusOf(session.sessionId).state,
             ]),
           ]),
           [...collapsed].sort(),
@@ -1511,9 +1553,8 @@ window.__ModuleLoader__.load({
              when it is not, so the selection is part of the shape of the list. */
           currentSessionId() ?? null,
           blankSessions(),
-          /* The shipped row's leading cell is a live component (dot, spinner,
-             status colour): rebuilding on its markup keeps our copy in step. */
-          nativeRows.size === 0 ? null : [...nativeRows].map(([id, row]) => `${id}:${row.firstElementChild?.outerHTML ?? ''}`),
+          /* Trailing time labels are mirrored from the shipped rows. */
+          nativeRows.size === 0 ? null : [...nativeRows].map(([id, row]) => `${id}:${[...row.children].find((node) => hasClassNamed(node, 'time'))?.textContent ?? ''}`),
         ])
         if (wrapper === null || list !== found || next !== signature) {
           const fresh = build()
@@ -1565,6 +1606,14 @@ window.__ModuleLoader__.load({
       observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-selected', 'class'] })
 
       const unsubscribe = store.subscribe(schedule)
+      /* Run state changes without touching the DOM of a hidden shipped row, so
+         listen to the stores the shipped row itself renders from. */
+      const unsubscribeStatus = (() => {
+        try { return options.sessionStatus?.subscribe?.(schedule) ?? (() => {}) } catch { return () => {} }
+      })()
+      const unsubscribeSessions = (() => {
+        try { return options.sessions?.list?.subscribe?.(schedule) ?? (() => {}) } catch { return () => {} }
+      })()
       /* Bound Session titles live on the Host, so a cheap poll keeps the group
          labels honest after a rename made somewhere else in the app. */
       const ticker = setInterval(() => {
@@ -1576,6 +1625,8 @@ window.__ModuleLoader__.load({
       return () => {
         disposed = true
         unsubscribe()
+        unsubscribeStatus()
+        unsubscribeSessions()
         clearInterval(ticker)
         observer.disconnect()
         if (frame !== 0) cancelAnimationFrame(frame)
@@ -1795,7 +1846,7 @@ window.__ModuleLoader__.load({
     }
 
     return {
-      inject: ['slots', 'locale', 'sessions', 'uiWorkspace', 'workspaces'],
+      inject: ['slots', 'locale', 'sessions', 'uiSession', 'uiWorkspace', 'workspaces'],
       apply(ctx) {
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'topics: dictionaries')
         ctx.effect(() => installStyles(), 'topics: stylesheet')
@@ -1823,6 +1874,7 @@ window.__ModuleLoader__.load({
 
         const workspaces = ctx.get?.('workspaces') ?? ctx.workspaces
         const sessions = ctx.get?.('sessions') ?? ctx.sessions
+        const uiSession = ctx.get?.('uiSession') ?? ctx.uiSession
 
         /* The sidebar has no group-level slot, so topics are rendered as peer
            groups beside the shipped workspace groups. */
@@ -1830,6 +1882,7 @@ window.__ModuleLoader__.load({
           store,
           t,
           sessions,
+          sessionStatus: uiSession?.sessionStatus,
           isPinned: (sessionId) => {
             try {
               const snap = workspaces?.list?.getSnapshot?.()

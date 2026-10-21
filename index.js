@@ -285,7 +285,9 @@ export function apply(ctx) {
       const rows = await ctx.sessionQuery.readTitleSnapshots(sessionIds)
       for (const row of rows) {
         const id = row?.sessionId
-        const title = row?.title?.title
+        /* readTitleSnapshots answers settled results: { status, sessionId, value: { session, title } }. */
+        if (row?.status === 'rejected') continue
+        const title = row?.value?.title?.title ?? row?.title?.title
         if (typeof id === 'string' && typeof title === 'string' && title !== '') titles[id] = title
       }
     } catch (error) {
