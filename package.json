@@ -1,7 +1,6 @@
 {
   "name": "@local/dsh-topics",
   "version": "1.0.0",
-  "private": true,
   "type": "module",
   "exports": {
     ".": "./index.js",
@@ -25,5 +24,17 @@
       "immediately": true,
       "inject": []
     }
-  }
+  },
+  "description": "DSH sidebar topics: group sessions under #topics, bind prompt/notes/skills, optional topic_update_prompt tool.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kidrauhl123/dsh-topics.git"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "topics"
+  ]
 }

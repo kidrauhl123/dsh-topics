@@ -56,6 +56,8 @@ function normalizeTopic(value, fallbackId) {
     title,
     /* Free text appended to the topic section: instructions, notes, skill names. */
     prompt: typeof value.prompt === 'string' ? value.prompt : '',
+    /* When true, dsh-purge may inject 破甲 for Sessions bound to this topic. */
+    purgeEnabled: value.purgeEnabled === true,
     createdAt: typeof value.createdAt === 'string' ? value.createdAt : now(),
     updatedAt: typeof value.updatedAt === 'string' ? value.updatedAt : now(),
   }
@@ -304,9 +306,8 @@ export function apply(ctx) {
     return {
       version: STATE_VERSION,
       defaultCwd: ctx.workingDirectory.defaultDirectory,
-      /* The Workspace a topic would create its next Session in. The browser needs
-         it to reuse that Workspace's blank Session, the way the shipped sidebar
-         does, instead of opening a Session that has no home. */
+      /* Harness 默认工作区 id (defaultWorkspaceId). Client reuses that
+         Workspace's blank Session — never a cwd/Desktop guess. */
       workspaceId: workspace?.id,
       topics: state.topics.map((topic) => ({
         ...topic,
@@ -330,41 +331,42 @@ export function apply(ctx) {
   const respond = async (extra) => json({ ...extra, ...(await view()) })
 
   /**
-   * Pick the Workspace a topic's new Session belongs to.
+   * The Workspace every topic Session must use: the harness **默认工作区**
+   * (`workspace.json` → `global.defaultWorkspaceId`), NOT macOS Desktop and
+   * NOT `workingDirectory.defaultDirectory`.
    *
-   * Every Session lives in a Workspace, and a Session created outside one opens
-   * behind a "pick a Workspace" prompt — so a topic never creates a Session
-   * without a home. The default directory wins when it is itself a registered
-   * Workspace; otherwise the most recently touched Workspace is the best guess,
-   * and the first registered one is the last resort.
-   * @returns the Workspace, or undefined when none is registered.
+   * `workspaceRegistry.initializeDefault()` returns that persisted default
+   * when `defaultWorkspaceId` is set (resolveDirectory is unused then). It
+   * never invents a Workspace from cwd. If no default is registered, return
+   * undefined — do not fall back to any other Workspace or a bare cwd.
+   * @returns the default Workspace entity, or undefined.
    */
   const workspaceFor = async () => {
     try {
-      const byPath = await ctx.workspaceRegistry.resolveByPath(ctx.workingDirectory.defaultDirectory)
-      if (byPath !== undefined) return byPath
-    } catch {
-      /* the default directory need not be a registered Workspace */
-    }
-    let all = []
-    try {
-      all = ctx.workspaceRegistry.list()
-    } catch {
+      const workspace = await ctx.workspaceRegistry.initializeDefault(async () => {
+        /* First-use only (empty registry). Prefer an existing defaultDirectory
+           path if the host has one; otherwise refuse rather than guessing Desktop. */
+        const dir = ctx.workingDirectory?.defaultDirectory
+        if (typeof dir === 'string' && dir !== '') return dir
+        throw new Error('topics: cannot initialize default Workspace without a directory')
+      })
+      return workspace
+    } catch (error) {
+      ctx.logger?.warn?.(`topics: could not resolve 默认工作区 / defaultWorkspaceId: ${String(error?.message ?? error)}`)
       return undefined
     }
-    if (all.length === 0) return undefined
-    let best = all[0]
-    for (const workspace of all) {
-      if (String(workspace.updatedAt ?? '') > String(best.updatedAt ?? '')) best = workspace
-    }
-    return best
   }
 
-  /** Resolve a Session creation target that always carries a Workspace. */
+  /**
+   * Session creation target: only `{ workspaceId }` of the harness default
+   * Workspace. Never `{ cwd: defaultDirectory }` (that put Sessions on Desktop).
+   */
   const defaultTarget = async () => {
     const workspace = await workspaceFor()
-    if (workspace !== undefined) return { workspaceId: workspace.id }
-    return { cwd: ctx.workingDirectory.defaultDirectory }
+    if (workspace === undefined) {
+      throw new Error('topics: no 默认工作区 (defaultWorkspaceId) is set; pick one in the sidebar before creating a topic Session')
+    }
+    return { workspaceId: workspace.id }
   }
 
   /**
@@ -389,22 +391,10 @@ export function apply(ctx) {
     return sessionId
   }
 
-  /* dsh-purge (and older personaSuffix templates) still reference {{cwd}}.
-     dsh 0.2.1-rc.2 no longer registers it; without this, every turn fails
-     during prompt assembly. Working-directory also publishes the path as
-     runtime context — this variable only satisfies the template. */
-  ctx.effect(() => ctx.systemPrompt.variable('cwd', (context) => {
-    const agent = context?.agent
-    const sessionId = typeof agent?.session === 'string' ? agent.session
-      : typeof agent?.id === 'string' ? agent.id
-      : undefined
-    try {
-      if (sessionId !== undefined) return String(ctx.workingDirectory.get(sessionId))
-    } catch {
-      /* projection may be unavailable for a brand-new agent */
-    }
-    return String(ctx.workingDirectory.defaultDirectory ?? '')
-  }), 'topics: cwd prompt variable')
+  /* Do not register {{cwd}} here. dsh-purge (and any host that already
+     satisfies personaSuffix templates) owns that variable; a second
+     systemPrompt.variable('cwd', …) fails enable with "already registered".
+     Working-directory still exposes the path on agent/runtime context. */
 
   ctx.on('agent/created', async ({ agent }) => {
     await load()
@@ -491,7 +481,18 @@ export function apply(ctx) {
     return { ok: true, topic: state.topics[index] }
   }
 
-  /* Edit the topic's own prompt text; bound Sessions read it at assembly time. */
+  /** Opt this topic into (or out of) dsh-purge 破甲 inject for its bound Sessions. */
+  const setTopicPurgeEnabled = async (id, purgeEnabled) => {
+    await load()
+    if (typeof purgeEnabled !== 'boolean') return { ok: false, error: 'purgeEnabled must be a boolean' }
+    const index = state.topics.findIndex((topic) => topic.id === id)
+    if (index === -1) return { ok: false, error: `unknown topic "${id}"` }
+    state.topics[index] = { ...state.topics[index], purgeEnabled, updatedAt: now() }
+    await persist()
+    return { ok: true, topic: state.topics[index] }
+  }
+
+  /* Edit prompt and/or purgeEnabled; bound Sessions read both at assembly time. */
   ctx.connection.fetch.register({
     path: ROUTE_UPDATE,
     methods: ['POST'],
@@ -500,8 +501,18 @@ export function apply(ctx) {
       const body = await readJson(request)
       return serialize(async () => {
         const id = typeof body.id === 'string' ? body.id : ''
-        const result = await setTopicPrompt(id, body.prompt)
-        if (!result.ok) return await respond({ error: result.error })
+        if (Object.prototype.hasOwnProperty.call(body, 'purgeEnabled')) {
+          const result = await setTopicPurgeEnabled(id, body.purgeEnabled)
+          if (!result.ok) return await respond({ error: result.error })
+        }
+        if (Object.prototype.hasOwnProperty.call(body, 'prompt')) {
+          const result = await setTopicPrompt(id, body.prompt)
+          if (!result.ok) return await respond({ error: result.error })
+        }
+        if (!Object.prototype.hasOwnProperty.call(body, 'purgeEnabled')
+          && !Object.prototype.hasOwnProperty.call(body, 'prompt')) {
+          return await respond({ error: 'prompt or purgeEnabled is required' })
+        }
         return json(await view())
       })
     },

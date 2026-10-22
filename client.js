@@ -80,6 +80,8 @@ window.__ModuleLoader__.load({
       'detailsSave': '保存',
       'detailsSaving': '正在保存…',
       'detailsCreated': '创建于',
+      'detailsPurge': '破甲注入',
+      'detailsPurgeHint': '开启后，绑定到本话题的会话才会注入 dsh-purge 破甲提示词；无话题或未开启则不注入。',
       'close': '关闭',
       'group.empty': '还没有会话',
       'group.untitled': '未命名会话',
@@ -141,6 +143,8 @@ window.__ModuleLoader__.load({
       'detailsSave': 'Save',
       'detailsSaving': 'Saving…',
       'detailsCreated': 'Created',
+      'detailsPurge': 'Jailbreak inject',
+      'detailsPurgeHint': 'When on, Sessions bound to this topic get dsh-purge inject; no topic or off means no inject.',
       'close': 'Close',
       'group.empty': 'No Sessions yet',
       'group.untitled': 'Untitled Session',
@@ -356,6 +360,7 @@ window.__ModuleLoader__.load({
         create: (title) => request('api/topics.create', { title }),
         rename: (id, title) => request('api/topics.rename', { id, title }),
         update: (id, prompt) => request('api/topics.update', { id, prompt }),
+        setPurgeEnabled: (id, purgeEnabled) => request('api/topics.update', { id, purgeEnabled }),
         remove: (id) => request('api/topics.delete', { id }),
         createSession: (id) => request('api/topics.session', { id }),
         bind: (sessionId, topicId) => request('api/topics.bind', { sessionId, topicId }),
@@ -626,6 +631,49 @@ window.__ModuleLoader__.load({
         if (created !== null && !Number.isNaN(created.getTime())) {
           body.append(row(t('detailsCreated'), created.toLocaleString()))
         }
+
+        const purgeRow = document.createElement('div')
+        purgeRow.className = 'dsh-topics-detailRow'
+        const purgeKey = document.createElement('span')
+        purgeKey.className = 'dsh-topics-detailKey'
+        purgeKey.textContent = t('detailsPurge')
+        const purgeLabel = document.createElement('label')
+        purgeLabel.style.display = 'inline-flex'
+        purgeLabel.style.alignItems = 'center'
+        purgeLabel.style.gap = '8px'
+        const purgeToggle = document.createElement('input')
+        purgeToggle.type = 'checkbox'
+        purgeToggle.checked = topic.purgeEnabled === true
+        purgeToggle.setAttribute('aria-label', t('detailsPurge'))
+        const purgeState = document.createElement('span')
+        purgeState.className = 'dsh-topics-detailValue'
+        const syncPurgeLabel = () => {
+          purgeState.textContent = purgeToggle.checked ? 'ON' : 'OFF'
+        }
+        syncPurgeLabel()
+        purgeToggle.addEventListener('change', () => {
+          const next = purgeToggle.checked === true
+          purgeToggle.disabled = true
+          store.setPurgeEnabled(topic.id, next).then((value) => {
+            const updated = (value?.topics || []).find((item) => item.id === topic.id)
+            if (updated) topic.purgeEnabled = updated.purgeEnabled === true
+            purgeToggle.checked = topic.purgeEnabled === true
+            syncPurgeLabel()
+          }).catch((error) => {
+            purgeToggle.checked = topic.purgeEnabled === true
+            syncPurgeLabel()
+            ctx.logger?.warn?.(`topics: could not set purgeEnabled: ${String(error?.message ?? error)}`)
+          }).finally(() => {
+            purgeToggle.disabled = false
+          })
+        })
+        purgeLabel.append(purgeToggle, purgeState)
+        purgeRow.append(purgeKey, purgeLabel)
+        body.append(purgeRow)
+        const purgeHint = document.createElement('p')
+        purgeHint.className = 'dsh-topics-promptHint'
+        purgeHint.textContent = t('detailsPurgeHint')
+        body.append(purgeHint)
 
         const promptLabel = document.createElement('div')
         promptLabel.className = 'dsh-topics-detailRow'
@@ -2007,7 +2055,10 @@ window.__ModuleLoader__.load({
           },
           /* Reuse the Workspace's blank Session the way the shipped sidebar
              does, then bind it to the topic: one placeholder per Workspace, and
-             a blank that is walked away from stops being rendered anywhere. */
+             a blank that is walked away from stops being rendered anywhere.
+             workspaceId comes from the host view (default Workspace ensured for
+             every topic). If it is missing, createSession still asks the host,
+             which follows the default Workspace rather than a homeless Session. */
           newSession: async (topicId) => {
             try {
               const workspaceId = store.get().workspaceId
@@ -2017,7 +2068,7 @@ window.__ModuleLoader__.load({
                 if (typeof sessionId === 'string') await store.bind(sessionId, topicId)
               } else {
                 const value = await store.createSession(topicId)
-                sessionId = value.sessionId
+                sessionId = value?.sessionId
               }
               if (typeof sessionId === 'string') ctx.uiWorkspace.openSession(sessionId)
             } catch (error) {
